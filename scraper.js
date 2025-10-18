@@ -1,9 +1,78 @@
 import { launch } from 'puppeteer-core';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'fs';
 
-async function scrapOrder( url ) {
+function isRunning(pid) {
 
-   mkdirSync( "./browsers/", { recursive: true } );
+  try {
+    // Attempt to send signal 0. This checks existence and permissions.
+    // It will throw an error if the process does not exist (ESRCH)
+    // or if the user does not have permission (EPERM).
+    process.kill(pid, 0);
+    return true; // Success: PID exists and is accessible
+  }
+  catch (e) {
+    // Error handling
+    if (e.code === 'ESRCH') {
+      // ESRCH: No such process (The PID does not exist)
+      return false;
+    } else if (e.code === 'EPERM') {
+      // EPERM: Operation not permitted (The PID exists, but the user doesn't
+      // have permission to signal it, so it's running but not accessible/signalable)
+      // For most use cases, if you can't signal it, you treat it as "not accessible".
+      // Depending on requirements, you might want to return true here, but
+      // the standard approach for "does it exist AND can I interact with it" is false.
+      return true; // We assume it exists but is inaccessible
+    }
+    else {
+      // Other errors (e.g., invalid signal number, invalid PID)
+      console.error(`Error checking PID ${pid}: ${e.message}`);
+      return false;
+    }
+  }
+}
+
+function fileExists( filePath ) {
+
+  try {
+  
+    statSync(filePath);
+
+    return true;
+
+  }
+  catch ( _ ) {
+
+    return false;
+
+  }
+
+}
+
+async function scrapeOrder( url ) {
+
+  const filePathPid = "./browsers/chrome_profile/pid.txt";
+
+  if ( fileExists( filePathPid ) ) {
+
+    const data = readFileSync(filePathPid, { encoding: 'utf8' });
+
+    const pidString = data.trim();
+    const pid = parseInt(pidString, 10);
+
+    if ( isRunning( pid ) ) {
+
+      return false;
+
+    }
+    else {
+
+      unlinkSync( filePathPid );      
+
+    }
+
+  }
+
+  mkdirSync( "./browsers/", { recursive: true } );
 
   const browser = await launch({
     executablePath: '/usr/local/bin/google-chrome-container', // o '/usr/bin/google-chrome'
@@ -23,6 +92,10 @@ async function scrapOrder( url ) {
       */
   });
 
+  const pid = browser.process().pid;
+
+  writeFileSync( filePathPid, pid + "" );
+
   await new Promise(resolve => setTimeout(resolve, 5000));
 
   // Obtener todas las pestañas
@@ -37,7 +110,7 @@ async function scrapOrder( url ) {
     if (url === 'about:blank' || url === '' || title.match(/order\s*#/i)) {
     
       await page.close();
-      
+
     }
 
   }  
@@ -125,8 +198,13 @@ async function scrapOrder( url ) {
     await emailPage.close();
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    await browser.close();
   }
+
+  unlinkSync( filePathPid );
+
+  await browser.close();
+
+  return true;
   
   //await page.close();
   //await browser.close();
@@ -142,7 +220,7 @@ async function main() {
   //let url = "https://mail.google.com/mail/u/orders@weknock.com/#all/199f2a6cf9579541";
   let url = "https://mail.google.com/mail/u/orders@weknock.com/#all/199f0474ea4225f6";
 
-  await scrapOrder( url );
+  await scrapeOrder( url );
 
 }
 
